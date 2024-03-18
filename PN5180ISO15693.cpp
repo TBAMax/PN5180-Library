@@ -115,7 +115,7 @@ ISO15693ErrorCode PN5180ISO15693::inventoryPoll(uint8_t *uid, uint8_t maxTags, u
   } 
   uint8_t *p = (uint8_t*)&(collision[0]);
   //                      Flags,  CMD,
-  uint8_t inventory[7] = { 0x06, 0x01, maskLen*4, p[0], p[1], p[2], p[3] };
+  uint8_t inventory[7] = { 0x06, 0x01, (uint8_t)(maskLen*4), p[0], p[1], p[2], p[3] };
   //                         |\- inventory flag + high data rate
   //                         \-- 16 slots: upto 16 cards, no AFI field present
   uint8_t cmdLen = 3 + (maskLen/2) + (maskLen%2);
@@ -307,7 +307,7 @@ ISO15693ErrorCode PN5180ISO15693::writeSingleBlock(uint8_t *uid, uint8_t blockNo
   //                               \-- no options, addressed by UID
 
   uint8_t writeCmdSize = sizeof(writeSingleBlock) + blockSize;
-  uint8_t *writeCmd = (uint8_t*)malloc(writeCmdSize);
+  uint8_t writeCmd[256];
   uint8_t pos = 0;
   writeCmd[pos++] = writeSingleBlock[0];
   writeCmd[pos++] = writeSingleBlock[1];
@@ -335,11 +335,12 @@ ISO15693ErrorCode PN5180ISO15693::writeSingleBlock(uint8_t *uid, uint8_t blockNo
   uint8_t *resultPtr;
   ISO15693ErrorCode rc = issueISO15693Command(writeCmd, writeCmdSize, &resultPtr);
   if (ISO15693_EC_OK != rc) {
-    free(writeCmd);
+    //free(writeCmd);
+    Serial.print("command error");
     return rc;
   }
 
-  free(writeCmd);
+  //free(writeCmd);
   return ISO15693_EC_OK;
 }
 
@@ -380,9 +381,9 @@ ISO15693ErrorCode PN5180ISO15693::readMultipleBlock(uint8_t *uid, uint8_t blockN
     PN5180DEBUG("End of block exceeds length of data");
     return ISO15693_EC_BLOCK_NOT_AVAILABLE;
   }
-
+  
   //                              flags, cmd, uid,             1stBlock blocksToRead  
-  uint8_t readMultipleCmd[12] = { 0x22, 0x23, 1,2,3,4,5,6,7,8, blockNo, numBlock-1 }; // UID has LSB first!
+  uint8_t readMultipleCmd[12] = { 0x22, 0x23, 1,2,3,4,5,6,7,8, blockNo, (uint8_t)(numBlock-1) }; // UID has LSB first!
   //                                |\- high data rate
   //                                \-- no options, addressed by UID
 
@@ -397,7 +398,7 @@ ISO15693ErrorCode PN5180ISO15693::readMultipleBlock(uint8_t *uid, uint8_t blockN
   PN5180DEBUG(", blockSize=");
   PN5180DEBUG(blockSize);
   PN5180DEBUG(", Cmd: ");
-  for (int i=0; i<sizeof(readMultipleCmd); i++) {
+  for (uint8_t i=0; i<sizeof(readMultipleCmd); i++) {
     PN5180DEBUG(" ");
     PN5180DEBUG(formatHex(readMultipleCmd[i]));
   }
@@ -730,7 +731,7 @@ ISO15693ErrorCode PN5180ISO15693::issueISO15693Command(uint8_t *cmd, uint8_t cmd
 
   uint32_t irqR = getIRQStatus();
   if (0 == (irqR & RX_SOF_DET_IRQ_STAT)) {
-	PN5180DEBUG("Didnt detect RX_SOF_DET_IRQ_STAT after sendData");
+	PN5180DEBUG(F("Didnt detect RX_SOF_DET_IRQ_STAT after sendData"));
 	return EC_NO_CARD;
   }
   
@@ -749,7 +750,7 @@ ISO15693ErrorCode PN5180ISO15693::issueISO15693Command(uint8_t *cmd, uint8_t cmd
   while (!(irqR & RX_IRQ_STAT)) {
       irqR = getIRQStatus();
       if (millis() - startedWaiting > commandTimeout) {
-          PN5180DEBUG("Didnt detect RX_IRQ_STAT after sendData");
+          PN5180DEBUG(F("Didnt detect RX_IRQ_STAT after sendData"));
           return EC_NO_CARD;
       }
   }
@@ -783,20 +784,20 @@ ISO15693ErrorCode PN5180ISO15693::issueISO15693Command(uint8_t *cmd, uint8_t cmd
 
   uint32_t irqStatus = getIRQStatus();
   if (0 == (RX_SOF_DET_IRQ_STAT & irqStatus)) { // no card detected
-     PN5180DEBUG("Didnt detect RX_SOF_DET_IRQ_STAT after readData");
+     PN5180DEBUG(F("Didnt detect RX_SOF_DET_IRQ_STAT after readData"));
      clearIRQStatus(TX_IRQ_STAT | IDLE_IRQ_STAT);
      return EC_NO_CARD;
   }
 
   uint8_t responseFlags = (*resultPtr)[0];
   if (responseFlags & (1<<0)) { // error flag
-    uint8_t errorCode = (*resultPtr)[1];
+    uint8_t errorCode = (*resultPtr)[0];
     
-    PN5180DEBUG("ERROR code=");
+    PN5180DEBUG(F("ERROR code="));
     PN5180DEBUG(formatHex(errorCode));
-    PN5180DEBUG(" - ");
+    PN5180DEBUG(F(" - "));
     PN5180DEBUG(strerror((ISO15693ErrorCode)errorCode));
-    PN5180DEBUG("\n");
+    PN5180DEBUG(F("\n"));
 
     if (errorCode >= 0xA0) { // custom command error codes
       return ISO15693_EC_CUSTOM_CMD_ERROR;
@@ -806,7 +807,7 @@ ISO15693ErrorCode PN5180ISO15693::issueISO15693Command(uint8_t *cmd, uint8_t cmd
 
 #ifdef DEBUG
   if (responseFlags & (1<<3)) { // extendsion flag
-    PN5180DEBUG("Extension flag is set!\n");
+    PN5180DEBUG(F("Extension flag is set!\n"));
   }
 #endif
 
@@ -816,7 +817,7 @@ ISO15693ErrorCode PN5180ISO15693::issueISO15693Command(uint8_t *cmd, uint8_t cmd
 
 bool PN5180ISO15693::setupRF() {
   PN5180DEBUG(F("Loading RF-Configuration...\n"));
-  if (loadRFConfig(0x0d, 0x8d)) {  // ISO15693 parameters
+  if (loadRFConfig(0x0D, 0x8D)) {  // ISO15693 parameters
     PN5180DEBUG(F("done.\n"));
   }
   else return false;
